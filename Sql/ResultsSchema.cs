@@ -39,10 +39,10 @@ CREATE TYPE Benchmark.TableIoTvp AS TABLE (
   , LobPageServerReadAheadReads  INT               NULL
 );
 
-DROP TABLE IF EXISTS Benchmark.IndexClass;
-DROP TABLE IF EXISTS Benchmark.QueryClass;
-DROP TABLE IF EXISTS Benchmark.Sample;
 DROP TABLE IF EXISTS Benchmark.SampleTableIo;
+DROP TABLE IF EXISTS Benchmark.Sample;
+DROP TABLE IF EXISTS Benchmark.QueryClass;
+DROP TABLE IF EXISTS Benchmark.IndexClass;
 
 CREATE TABLE Benchmark.IndexClass (
     IndexClassID                 INT IDENTITY(1, 1)  NOT NULL
