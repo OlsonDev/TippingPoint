@@ -6,15 +6,15 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using TippingPoint.Extensions;
 using TippingPoint.Dto;
-using TippingPoint.SqlStatistics;
-using System.Text.Json;
-using TippingPoint.Benchmark;
 using TippingPoint.Sql;
+using TippingPoint.Benchmark.Telemetry;
+using TippingPoint.Benchmark.IndexBenchmarks;
+using System.Text.Json;
+using System.IO;
 
 namespace TippingPoint {
   internal class Program {
-
-    public const int Iterations = 3; // 50
+    public const int Iterations = 50;
     public const int SamplesPerIteration = 100;
     private static readonly Random Random = new Random();
     private static readonly string MasterConnectionString = "Data Source=localhost;Initial Catalog=master;Integrated Security=True";
@@ -22,6 +22,10 @@ namespace TippingPoint {
     private static readonly MemoryDb MemoryDb = new MemoryDb();
     private static readonly List<List<DynamicParameters>> HitQueryParametersPerIteration = new List<List<DynamicParameters>>(Iterations);
     private static readonly List<List<DynamicParameters>> MissQueryParametersPerIteration = new List<List<DynamicParameters>>(Iterations);
+    private static readonly List<IndexBenchmarkBase> IndexesToBenchmark = new List<IndexBenchmarkBase> {
+      new Index2Include3Benchmark(),
+      new Index3Include2Benchmark(),
+    };
 
     // TODO: Play with
     // dbo.NotificationSettings (UserID, NotificationType, OrgID) INCLUDE (NotificationMethod, Role)
@@ -34,10 +38,16 @@ namespace TippingPoint {
     internal static async Task Main() {
       PrepTvpCache();
       await GenerateMemoryDbDataAsync();
-      await InitSchemaAsync(2);
-      var twoIndexBenchmark = await RunBenchmarkAsync();
-      await InitSchemaAsync(3);
-      var threeIndexBenchmark = await RunBenchmarkAsync();
+      foreach (var indexBenchmark in IndexesToBenchmark) {
+        await InitSchemaAsync(indexBenchmark);
+        await RunBenchmarkAsync(indexBenchmark);
+      }
+
+      Console.WriteLine();
+      Console.Write("Writing result.json... ");
+      var json = JsonSerializer.Serialize(IndexesToBenchmark);
+      File.WriteAllText("result.json", json);
+      Console.WriteLine("done!");
     }
 
     private static void PrepTvpCache() {
@@ -46,58 +56,31 @@ namespace TippingPoint {
       DapperExtensions.PrepTvpTypeCache<QuxDto>("dbo.QuxTvp");
     }
 
-    private static async Task<IEnumerable<IterationBenchmark>> RunBenchmarkAsync() {
-      Console.WriteLine("Running benchmark...");
+    private static async Task RunBenchmarkAsync(IndexBenchmarkBase indexBenchmark) {
+      Console.WriteLine("Running index benchmark...");
       var connection = new SqlConnection(ConnectionString);
       await connection.OpenAsync();
-
-      var benchmarks = new List<IterationBenchmark>(Iterations);
       for (var i = 0; i < Iterations; i++) {
-        var iterationBenchmark = new IterationBenchmark();
         Console.WriteLine($"Inserting data for iteration #{i + 1,2}");
+
         await InsertFoosAsync(connection, i);
         await InsertBarsAsync(connection, i);
         await InsertQuxsAsync(connection, i);
+
         Console.WriteLine($"Running queries for iteration #{i + 1,2}");
-        await RunQueriesToBenchmarkAsync(connection, i, iterationBenchmark);
-        benchmarks.Add(iterationBenchmark);
+        var hitSampleParameters = HitQueryParametersPerIteration[i];
+        var missSampleParameters = MissQueryParametersPerIteration[i];
+        await indexBenchmark.RunQueriesToBenchmarkAsync(connection, hitSampleParameters, missSampleParameters);
       }
       await connection.CloseAsync();
-      return benchmarks;
     }
 
-    private static SqlInfoMessageEventHandler BuildInfoMessageHandler(TaskCompletionSource<Statistics> source) {
-      var statistics = new Statistics();
-      return (sender, e) => {
-        statistics.HandleInfoMessageEvent(e);
-        if (statistics.IsComplete) source.SetResult(statistics);
-      };
-    }
-
-    private static async Task RunQueriesToBenchmarkAsync(
+    private static async Task InsertAsync<TDto, TId>(
       SqlConnection connection,
       int iteration,
-      IterationBenchmark iterationBenchmark) {
-      await connection.ExecuteAsync(Stats.On);
-      var statisticsSource = new TaskCompletionSource<Statistics>();
-      var infoMessageHandler = BuildInfoMessageHandler(statisticsSource);
-      connection.InfoMessage += infoMessageHandler;
-      var dtos = (await connection.QueryAsync<FooDto>("SELECT TOP 10000 * FROM dbo.Foo;")).AsList();
-      Console.WriteLine($"Retrieved {dtos.Count} DTOs.");
-
-      // In testing this, I've found it's more likely we'll have the InfoMessage events sent prior
-      // to us having DTO data, but we'll await that 2nd because it seems more finnicky with timing.
-      Console.Write("Waiting for statistics... ");
-      var statistics = await statisticsSource.Task;
-      Console.WriteLine($"done!");
-      Console.WriteLine(JsonSerializer.Serialize(statistics));
-      Console.WriteLine();
-
-      connection.InfoMessage -= infoMessageHandler;
-      await connection.ExecuteAsync(Stats.Off);
-    }
-
-    private static async Task InsertAsync<TDto, TId>(SqlConnection connection, int iteration, string cmd, string tvpName, MemoryTable<TDto, TId> table) {
+      string cmd,
+      string tvpName,
+      MemoryTable<TDto, TId> table) {
       // We're going to insert in batches so we don't have to transmit everything across the
       // network before SQL Server acts. Let's go with an arbitrary size of 1000 row batches.
       var ranges = table.IterationRanges[iteration].InBatchesOf(1000, table.Rows.Count);
@@ -176,13 +159,13 @@ namespace TippingPoint {
       return $"{num:0.##} {suffix[i]}";
     }
 
-    private static async Task InitSchemaAsync(int countIndexed) {
+    private static async Task InitSchemaAsync(IndexBenchmarkBase indexBenchmark) {
       try {
-        await TryInitSchemaAsync(countIndexed);
+        await indexBenchmark.TryInitSchemaAsync(ConnectionString);
       } catch (SqlException) {
         await TryCreateDbAsync();
         await WaitForDatabaseReadyAsync();
-        await TryInitSchemaAsync(countIndexed);
+        await indexBenchmark.TryInitSchemaAsync(ConnectionString);
       }
     }
 
@@ -221,19 +204,6 @@ namespace TippingPoint {
           delay = Math.Min(400, delay + 100);
         }
       }
-    }
-
-    private static async Task TryInitSchemaAsync(int countIndexed) {
-      using var connection = new SqlConnection(ConnectionString);
-      Console.Write("Connecting to TippingPoint database... ");
-      await connection.OpenAsync();
-      Console.WriteLine("done!");
-      using var transaction = connection.BeginTransaction();
-      var cmd = Schema.DropAndCreateWithNIndexed(countIndexed);
-      Console.Write("Initializing TippingPoint schema... ");
-      await connection.ExecuteAsync(cmd, null, transaction);
-      await transaction.CommitAsync();
-      Console.WriteLine("done!");
     }
   }
 }

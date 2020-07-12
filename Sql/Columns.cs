@@ -10,6 +10,7 @@ namespace TippingPoint.Sql {
 	, UserCreated         NVARCHAR(256)     NOT NULL
 	, UserModified        NVARCHAR(256)         NULL
     ";
+
     public static readonly string Bar = @"
 	  BarID               INT               NOT NULL
 	, FooID               UNIQUEIDENTIFIER  NOT NULL -- OwnerID
@@ -21,6 +22,7 @@ namespace TippingPoint.Sql {
 	, UserCreated         NVARCHAR(256)     NOT NULL
 	, UserModified        NVARCHAR(256)         NULL
     ";
+
     public static readonly string Qux = @"
 	  QuxID               UNIQUEIDENTIFIER  NOT NULL
 	, FooID               UNIQUEIDENTIFIER  NOT NULL -- UserID

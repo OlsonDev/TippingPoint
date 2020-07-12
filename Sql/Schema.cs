@@ -4,7 +4,7 @@ namespace TippingPoint.Sql {
 IF DB_ID('TippingPoint') IS NULL
   CREATE DATABASE TippingPoint;
     ";
-    private static readonly string DropAndCreateBase = $@"
+    public static readonly string DropAndCreateBase = $@"
 DROP TYPE IF EXISTS dbo.QuxTvp;
 DROP TYPE IF EXISTS dbo.BarTvp;
 DROP TYPE IF EXISTS dbo.FooTvp;
@@ -46,21 +46,5 @@ CREATE TABLE dbo.Qux ( -- NotificationSettings
 CREATE INDEX IX_dbo_Bar_FooID
   ON dbo.Bar (FooID) INCLUDE (BarDatum1, BarDatum2, BarDatum3);
     ";
-
-    public static string DropAndCreateWithNIndexed(int countIndexed)
-      => DropAndCreateBase + countIndexed switch
-      {
-        2 => @"
-CREATE INDEX IX_dbo_Qux_FooID_QuxDatum1
-  ON dbo.Qux (FooID, QuxDatum1) INCLUDE (BarID, QuxDatum2, QuxDatum3);
-          ",
-
-        3 => @"
-CREATE INDEX IX_dbo_Qux_FooID_QuxDatum1_BarID
-  ON dbo.Qux (FooID, QuxDatum1, BarID) INCLUDE (QuxDatum2, QuxDatum3);
-          ",
-
-        _ => "",
-      };
   }
 }
