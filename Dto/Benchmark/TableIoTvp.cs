@@ -1,4 +1,6 @@
 using TippingPoint.Attributes;
+using TippingPoint.Benchmark.Telemetry;
+using TippingPoint.SqlStatistics;
 
 namespace TippingPoint.Dto.Benchmark {
   public class TableIoTvp {
@@ -54,40 +56,29 @@ namespace TippingPoint.Dto.Benchmark {
     public int? LobPageServerReadAheadReads { get; }
 
     public TableIoTvp(
-      string indexClassName,
-      string queryClassName,
+      IndexBenchmarkBase indexBenchmark,
+      QueryBenchmarkBase queryBenchmark,
       int iterationNumber,
       int sampleNumber,
-      string hitOrMiss,
-      string tableName,
-      int? scanCount,
-      int? logicalReads,
-      int? physicalReads,
-      int? pageServerReads,
-      int? readAheadReads,
-      int? pageServerReadAheadReads,
-      int? lobLogicalReads,
-      int? lobPhysicalReads,
-      int? lobPageServerReads,
-      int? lobReadAheadReads,
-      int? lobPageServerReadAheadReads) {
-      IndexClassName = indexClassName;
-      QueryClassName = queryClassName;
+      TableIo tableIo,
+      string hitOrMiss) {
+      IndexClassName = indexBenchmark.Name;
+      QueryClassName = queryBenchmark.Name;
       IterationNumber = iterationNumber;
       SampleNumber = sampleNumber;
       HitOrMiss = hitOrMiss;
-      TableName = tableName;
-      ScanCount = scanCount;
-      LogicalReads = logicalReads;
-      PhysicalReads = physicalReads;
-      PageServerReads = pageServerReads;
-      ReadAheadReads = readAheadReads;
-      PageServerReadAheadReads = pageServerReadAheadReads;
-      LobLogicalReads = lobLogicalReads;
-      LobPhysicalReads = lobPhysicalReads;
-      LobPageServerReads = lobPageServerReads;
-      LobReadAheadReads = lobReadAheadReads;
-      LobPageServerReadAheadReads = lobPageServerReadAheadReads;
+      TableName = tableIo.TableName;
+      ScanCount = tableIo.ScanCount;
+      LogicalReads = tableIo.LogicalReads;
+      PhysicalReads = tableIo.PhysicalReads;
+      PageServerReads = tableIo.PageServerReads;
+      ReadAheadReads = tableIo.ReadAheadReads;
+      PageServerReadAheadReads = tableIo.PageServerReadAheadReads;
+      LobLogicalReads = tableIo.LobLogicalReads;
+      LobPhysicalReads = tableIo.LobPhysicalReads;
+      LobPageServerReads = tableIo.LobPageServerReads;
+      LobReadAheadReads = tableIo.LobReadAheadReads;
+      LobPageServerReadAheadReads = tableIo.LobPageServerReadAheadReads;
     }
   }
 }

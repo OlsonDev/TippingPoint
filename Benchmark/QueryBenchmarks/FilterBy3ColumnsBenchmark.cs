@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -6,7 +7,7 @@ using TippingPoint.Dto;
 
 namespace TippingPoint.Benchmark.QueryBenchmarks {
   public class FilterBy3ColumnsBenchmark : QueryBenchmarkBase {
-    private const string Command = @"
+    private const string CommandFast = @"
       SELECT
           Q.QuxID
         , Q.FooID
@@ -19,7 +20,10 @@ namespace TippingPoint.Benchmark.QueryBenchmarks {
                                    AND Q.QuxDatum1  = @QuxDatum1
                                    AND Q.BarID      = @BarID;
     ";
-    protected override Task ExecuteQueryToBenchmarkAsync(SqlConnection connection, DynamicParameters parameters)
-      => connection.QueryAsync<QuxIndexDto>(Command, parameters);
+
+    public override string Command => CommandFast;
+
+    protected override async Task<int> ExecuteQueryToBenchmarkAsync(SqlConnection connection, DynamicParameters parameters)
+      => (await connection.QueryAsync<QuxIndexDto>(CommandFast, parameters)).AsList().Count();
   }
 }

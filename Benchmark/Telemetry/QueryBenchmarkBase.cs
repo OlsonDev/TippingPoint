@@ -12,9 +12,10 @@ namespace TippingPoint.Benchmark.Telemetry {
     // Not thread safe but expect this to be used single-threadedly
     private static readonly Stopwatch Stopwatch = new Stopwatch();
     public string Name => GetType().Name;
+    public abstract string Command { get; }
     public IList<IterationBenchmark> IterationBenchmarks { get; } = new List<IterationBenchmark>(Program.Iterations);
 
-    protected abstract Task ExecuteQueryToBenchmarkAsync(SqlConnection connection, DynamicParameters dynamicParameters);
+    protected abstract Task<int> ExecuteQueryToBenchmarkAsync(SqlConnection connection, DynamicParameters dynamicParameters);
 
     public async Task ExecuteIterationAsync(
       SqlConnection connection,
@@ -37,12 +38,12 @@ namespace TippingPoint.Benchmark.Telemetry {
       var infoMessageHandler = BuildInfoMessageHandler(statisticsSource);
       connection.InfoMessage += infoMessageHandler;
       Stopwatch.Restart();
-      await ExecuteQueryToBenchmarkAsync(connection, parameters);
+      var rowCount = await ExecuteQueryToBenchmarkAsync(connection, parameters);
       Stopwatch.Stop();
       var statistics = await statisticsSource.Task;
       connection.InfoMessage -= infoMessageHandler;
       await connection.ExecuteAsync(Stats.Off);
-      return new SampleBenchmark(Stopwatch.ElapsedTicks, statistics);
+      return new SampleBenchmark(Stopwatch.ElapsedTicks, rowCount, statistics);
     }
 
     private static SqlInfoMessageEventHandler BuildInfoMessageHandler(TaskCompletionSource<Statistics> source) {

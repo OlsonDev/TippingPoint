@@ -14,6 +14,7 @@ namespace TippingPoint.Benchmark.Telemetry {
     };
 
     public string Name => GetType().Name;
+    public abstract string Command { get; }
     protected abstract Task CreateIndexesAsync(SqlConnection connection, SqlTransaction transaction);
 
     public async Task TryInitSchemaAsync(string connectionString) {

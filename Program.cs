@@ -9,8 +9,7 @@ using TippingPoint.Dto;
 using TippingPoint.Sql;
 using TippingPoint.Benchmark.Telemetry;
 using TippingPoint.Benchmark.IndexBenchmarks;
-using System.Text.Json;
-using System.IO;
+using TippingPoint.Dto.Benchmark;
 
 namespace TippingPoint {
   internal class Program {
@@ -38,16 +37,12 @@ namespace TippingPoint {
     internal static async Task Main() {
       PrepTvpCache();
       await GenerateMemoryDbDataAsync();
+      await TryInitResultsSchemaAsync();
       foreach (var indexBenchmark in IndexesToBenchmark) {
         await InitSchemaAsync(indexBenchmark);
         await RunBenchmarkAsync(indexBenchmark);
       }
-
-      Console.WriteLine();
-      Console.Write("Writing result.json... ");
-      var json = JsonSerializer.Serialize(IndexesToBenchmark);
-      File.WriteAllText("result.json", json);
-      Console.WriteLine("done!");
+      await InsertBenchmarkResultsAsync();
     }
 
     private static void PrepTvpCache() {
@@ -61,18 +56,85 @@ namespace TippingPoint {
       var connection = new SqlConnection(ConnectionString);
       await connection.OpenAsync();
       for (var i = 0; i < Iterations; i++) {
-        Console.WriteLine($"Inserting data for iteration #{i + 1,2}");
+        Console.WriteLine($"Inserting data  for iteration #{i + 1,3}");
 
         await InsertFoosAsync(connection, i);
         await InsertBarsAsync(connection, i);
         await InsertQuxsAsync(connection, i);
 
-        Console.WriteLine($"Running queries for iteration #{i + 1,2}");
+        Console.WriteLine($"Running queries for iteration #{i + 1,3}");
         var hitSampleParameters = HitQueryParametersPerIteration[i];
         var missSampleParameters = MissQueryParametersPerIteration[i];
         await indexBenchmark.RunQueriesToBenchmarkAsync(connection, hitSampleParameters, missSampleParameters);
       }
       await connection.CloseAsync();
+    }
+
+    private static async Task InsertBenchmarkResultsAsync() {
+      Console.Write("Building benchmark results TVPs... ");
+      var tableIterationTvp = BuildTableIterationTvp();
+      var (flatResultTvp, tableIoTvp) = BuildBenchmarkResultsTvps();
+      Console.WriteLine($"done! {flatResultTvp.Count} flat result records and {tableIoTvp.Count} table IO records.");
+      Console.Write("Inserting benchmark results... ");
+      var connection = new SqlConnection(ConnectionString);
+      await connection.OpenAsync();
+      await connection.ExecuteAsync(Insert.ResultsFromTvps, new {
+        tableIterationTvp = tableIterationTvp.AsTableValuedParameter("Benchmark.TableIterationTvp"),
+        flatResultTvp = flatResultTvp.AsTableValuedParameter("Benchmark.FlatResultTvp"),
+        tableIoTvp = tableIoTvp.AsTableValuedParameter("Benchmark.TableIoTvp")
+      });
+      await connection.CloseAsync();
+      Console.WriteLine("done!");
+    }
+
+    private static List<TableIterationTvp> BuildTableIterationTvp() {
+      var tableIterationTvp = new List<TableIterationTvp>();
+      var fooRanges = MemoryDb.Foo.IterationRanges;
+      var barRanges = MemoryDb.Bar.IterationRanges;
+      var quxRanges = MemoryDb.Qux.IterationRanges;
+      for (var i = 0; i < Iterations; i++) {
+        var iterationNumber = i + 1;
+        tableIterationTvp.Add(new TableIterationTvp(iterationNumber, "Foo", fooRanges[i].End.GetOffset(int.MaxValue)));
+        tableIterationTvp.Add(new TableIterationTvp(iterationNumber, "Bar", barRanges[i].End.GetOffset(int.MaxValue)));
+        tableIterationTvp.Add(new TableIterationTvp(iterationNumber, "Qux", quxRanges[i].End.GetOffset(int.MaxValue)));
+      }
+      return tableIterationTvp;
+    }
+
+    private static (List<FlatResultTvp>, List<TableIoTvp>) BuildBenchmarkResultsTvps() {
+      var flatResultTvp = new List<FlatResultTvp>();
+      var tableIoTvp = new List<TableIoTvp>();
+      foreach (var indexBenchmark in IndexesToBenchmark) {
+        foreach (var queryBenchmark in indexBenchmark.QueriesToBenchmark) {
+          var iterationNumber = 0;
+          foreach (var iterationBenchmark in queryBenchmark.IterationBenchmarks) {
+            iterationNumber++;
+            BuildAndAddBenchmarkResultTvps(flatResultTvp, tableIoTvp, indexBenchmark, queryBenchmark, iterationBenchmark, iterationNumber, "Hit");
+            BuildAndAddBenchmarkResultTvps(flatResultTvp, tableIoTvp, indexBenchmark, queryBenchmark, iterationBenchmark, iterationNumber, "Miss");
+          }
+        }
+      }
+      return (flatResultTvp, tableIoTvp);
+    }
+
+    private static void BuildAndAddBenchmarkResultTvps(
+      IList<FlatResultTvp> flatResultTvp,
+      IList<TableIoTvp> tableIoTvp,
+      IndexBenchmarkBase indexBenchmark,
+      QueryBenchmarkBase queryBenchmark,
+      IterationBenchmark iterationBenchmark,
+      int iterationNumber,
+      string hitOrMiss) {
+      var sampleNumber = 0;
+      var samples = hitOrMiss == "Hit" ? iterationBenchmark.HitSamples : iterationBenchmark.MissSamples;
+      foreach (var sampleBenchmark in samples) {
+        sampleNumber++;
+        var timeStats = sampleBenchmark.Statistics.Time;
+        flatResultTvp.Add(new FlatResultTvp(indexBenchmark, queryBenchmark, sampleBenchmark, iterationNumber, sampleNumber, hitOrMiss));
+        foreach (var tableIo in sampleBenchmark.Statistics.Io.TableIos) {
+          tableIoTvp.Add(new TableIoTvp(indexBenchmark, queryBenchmark, iterationNumber, sampleNumber, tableIo, hitOrMiss));
+        }
+      }
     }
 
     private static async Task InsertAsync<TDto, TId>(
@@ -82,8 +144,8 @@ namespace TippingPoint {
       string tvpName,
       MemoryTable<TDto, TId> table) {
       // We're going to insert in batches so we don't have to transmit everything across the
-      // network before SQL Server acts. Let's go with an arbitrary size of 1000 row batches.
-      var ranges = table.IterationRanges[iteration].InBatchesOf(1000, table.Rows.Count);
+      // network before SQL Server acts. Let's go with an arbitrary size of 5000 row batches.
+      var ranges = table.IterationRanges[iteration].InBatchesOf(5000, table.Rows.Count);
       foreach (var range in ranges) {
         var tvp = table.Rows.EnumerateRange(range).AsTableValuedParameter(tvpName);
         await connection.ExecuteAsync(cmd, new { tvp });
@@ -102,6 +164,7 @@ namespace TippingPoint {
     private static async Task GenerateMemoryDbDataAsync() {
       Console.Write($"Generating data which'll span {Iterations} iterations... ");
       for (var i = 0; i < Iterations; i++) {
+        if (i > 50) Console.WriteLine($"Generating iteration #{i + 1,3}. CLR memory usage: {FormatBytes(GC.GetTotalMemory(false))}");
         var result = await MemoryDb.ScaleUpAsync();
 
         // Grab some query parameters for our benchmarks.
@@ -157,6 +220,27 @@ namespace TippingPoint {
         num = bytes / 1024.0;
       }
       return $"{num:0.##} {suffix[i]}";
+    }
+
+    private static async Task TryInitResultsSchemaAsync() {
+      try {
+        await InitResultsSchemaAsync();
+      } catch (SqlException) {
+        await TryCreateDbAsync();
+        await WaitForDatabaseReadyAsync();
+        await InitResultsSchemaAsync();
+      }
+    }
+
+    private static async Task InitResultsSchemaAsync() {
+        Console.Write("Connecting to master database... ");
+        var connection = new SqlConnection(ConnectionString);
+        await connection.OpenAsync();
+        Console.WriteLine("done!");
+        Console.Write("Creating benchmark results schema... ");
+        await connection.ExecuteAsync(ResultsSchema.DropAndCreateBase);
+        await connection.CloseAsync();
+        Console.WriteLine("done!");
     }
 
     private static async Task InitSchemaAsync(IndexBenchmarkBase indexBenchmark) {
