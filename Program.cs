@@ -10,11 +10,12 @@ using TippingPoint.Sql;
 using TippingPoint.Benchmark.Telemetry;
 using TippingPoint.Benchmark.IndexBenchmarks;
 using TippingPoint.Dto.Benchmark;
+using System.Runtime;
 
 namespace TippingPoint {
   internal class Program {
-    public const int Iterations = 50;
-    public const int SamplesPerIteration = 100;
+    public const int Iterations = 70;
+    public const int SamplesPerIteration = 20;
     private static readonly Random Random = new Random();
     private static readonly string MasterConnectionString = "Data Source=localhost;Initial Catalog=master;Integrated Security=True";
     private static readonly string ConnectionString = "Data Source=localhost;Initial Catalog=TippingPoint;Integrated Security=True";
@@ -22,8 +23,11 @@ namespace TippingPoint {
     private static readonly List<List<DynamicParameters>> HitQueryParametersPerIteration = new List<List<DynamicParameters>>(Iterations);
     private static readonly List<List<DynamicParameters>> MissQueryParametersPerIteration = new List<List<DynamicParameters>>(Iterations);
     private static readonly List<IndexBenchmarkBase> IndexesToBenchmark = new List<IndexBenchmarkBase> {
+      new FilteredIndex2Include3Benchmark(),
+      new FilteredIndex3Include2Benchmark(),
       new Index2Include3Benchmark(),
       new Index3Include2Benchmark(),
+      new NoIndexBenchmark(),
     };
 
     // TODO: Play with
@@ -38,9 +42,12 @@ namespace TippingPoint {
       PrepTvpCache();
       await GenerateMemoryDbDataAsync();
       await TryInitResultsSchemaAsync();
+      var i = 0;
       foreach (var indexBenchmark in IndexesToBenchmark) {
-        await InitSchemaAsync(indexBenchmark);
-        await RunBenchmarkAsync(indexBenchmark);
+        i++;
+
+        await InitSchemaAsync(i, indexBenchmark);
+        await RunBenchmarkAsync(i, indexBenchmark);
       }
       await InsertBenchmarkResultsAsync();
     }
@@ -51,21 +58,28 @@ namespace TippingPoint {
       DapperExtensions.PrepTvpTypeCache<QuxDto>("dbo.QuxTvp");
     }
 
-    private static async Task RunBenchmarkAsync(IndexBenchmarkBase indexBenchmark) {
-      Console.WriteLine("Running index benchmark...");
+    private static async Task RunBenchmarkAsync(int indexBenchmarkNumber, IndexBenchmarkBase indexBenchmark) {
+      Console.WriteLine($"Running index benchmark... #{indexBenchmarkNumber,2}/{IndexesToBenchmark.Count,2} | {indexBenchmark.Name}");
       var connection = new SqlConnection(ConnectionString);
       await connection.OpenAsync();
-      for (var i = 0; i < Iterations; i++) {
-        Console.WriteLine($"Inserting data  for iteration #{i + 1,3}");
 
+      var stopwatch = new Stopwatch();
+      for (var i = 0; i < Iterations; i++) {
+        Console.Write($"Inserting data  for iteration #{i + 1,3}... ");
+        stopwatch.Restart();
         await InsertFoosAsync(connection, i);
         await InsertBarsAsync(connection, i);
         await InsertQuxsAsync(connection, i);
+        stopwatch.Stop();
+        Console.WriteLine($"done! -- Elapsed: {stopwatch.Elapsed.ToHumanFormat()}");
 
-        Console.WriteLine($"Running queries for iteration #{i + 1,3}");
+        Console.Write($"Running queries for iteration #{i + 1,3}... ");
+        stopwatch.Restart();
         var hitSampleParameters = HitQueryParametersPerIteration[i];
         var missSampleParameters = MissQueryParametersPerIteration[i];
         await indexBenchmark.RunQueriesToBenchmarkAsync(connection, hitSampleParameters, missSampleParameters);
+        stopwatch.Stop();
+        Console.WriteLine($"done! -- Elapsed: {stopwatch.Elapsed.ToHumanFormat()}");
       }
       await connection.CloseAsync();
     }
@@ -162,9 +176,14 @@ namespace TippingPoint {
       => InsertAsync(connection, iteration, Insert.QuxsFromTvp, "dbo.QuxTvp", MemoryDb.Qux);
 
     private static async Task GenerateMemoryDbDataAsync() {
-      Console.Write($"Generating data which'll span {Iterations} iterations... ");
+      Console.WriteLine($"Generating data which'll span {Iterations} iterations... ");
+      var stopwatch = new Stopwatch();
+      stopwatch.Start();
       for (var i = 0; i < Iterations; i++) {
-        if (i > 50) Console.WriteLine($"Generating iteration #{i + 1,3}. CLR memory usage: {FormatBytes(GC.GetTotalMemory(false))}");
+        var shouldLogProgress = (i + 1) % 10 == 0 || i >= 49;
+        if (shouldLogProgress) {
+          Console.Write($"Generating iteration #{i + 1,3}... ");
+        }
         var result = await MemoryDb.ScaleUpAsync();
 
         // Grab some query parameters for our benchmarks.
@@ -195,19 +214,31 @@ namespace TippingPoint {
         }
         HitQueryParametersPerIteration.Add(hitIterationParameters);
         MissQueryParametersPerIteration.Add(missIterationParameters);
+
+        if (shouldLogProgress) {
+          stopwatch.Stop();
+          Console.WriteLine($"done! CLR memory usage: {FormatBytes(GC.GetTotalMemory(false))}; Elapsed: {stopwatch.Elapsed.ToHumanFormat()}");
+          stopwatch.Restart();
+        }
       }
 
+      Console.Write("Collecting garbage... ");
+      stopwatch.Restart();
+      GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+      GC.Collect(2, GCCollectionMode.Forced, true);
+      stopwatch.Stop();
+      Console.WriteLine($"done! CLR memory usage: {FormatBytes(GC.GetTotalMemory(false))}; Elapsed: {stopwatch.Elapsed.ToHumanFormat()}");
+
       // Print some pretty stuff.
-      Console.WriteLine($"done! CLR memory usage: {FormatBytes(GC.GetTotalMemory(false))}");
-      Console.WriteLine("| Iteration | # Foos  | # Bars  | # Quxs  |");
-      Console.WriteLine("|===========|=========|=========|=========|");
-      Console.WriteLine($"|    (Last) | {MemoryDb.Foo.Count,7} | {MemoryDb.Bar.Count,7} | {MemoryDb.Qux.Count,7} |");
-      Console.WriteLine("|===========|=========|=========|=========|");
+      Console.WriteLine("| Iteration | # Foos    | # Bars    | # Quxs    |");
+      Console.WriteLine("|===========|===========|===========|===========|");
+      Console.WriteLine($"|    (Last) | {MemoryDb.Foo.Count,9} | {MemoryDb.Bar.Count,9} | {MemoryDb.Qux.Count,9} |");
+      Console.WriteLine("|===========|===========|===========|===========|");
       var fooRanges = MemoryDb.Foo.IterationRanges;
       var barRanges = MemoryDb.Bar.IterationRanges;
       var quxRanges = MemoryDb.Qux.IterationRanges;
       for (var i = 0; i < Iterations; i++) {
-        var line = $"| {i + 1,9} | {fooRanges[i].End,7} | {barRanges[i].End,7} | {quxRanges[i].End,7} |";
+        var line = $"| {i + 1,9} | {fooRanges[i].End,9} | {barRanges[i].End,9} | {quxRanges[i].End,9} |";
         Console.WriteLine(line);
       }
     }
@@ -219,7 +250,7 @@ namespace TippingPoint {
       for (; i < suffix.Length && bytes >= 1024; i++, bytes /= 1024) {
         num = bytes / 1024.0;
       }
-      return $"{num:0.##} {suffix[i]}";
+      return $"{num:0.00} {suffix[i]}";
     }
 
     private static async Task TryInitResultsSchemaAsync() {
@@ -243,8 +274,9 @@ namespace TippingPoint {
         Console.WriteLine("done!");
     }
 
-    private static async Task InitSchemaAsync(IndexBenchmarkBase indexBenchmark) {
+    private static async Task InitSchemaAsync(int indexBenchmarkNumber, IndexBenchmarkBase indexBenchmark) {
       try {
+        Console.WriteLine($"Initializing schema for index benchmark... #{indexBenchmarkNumber,2}/{IndexesToBenchmark.Count,2} | {indexBenchmark.Name}");
         await indexBenchmark.TryInitSchemaAsync(ConnectionString);
       } catch (SqlException) {
         await TryCreateDbAsync();

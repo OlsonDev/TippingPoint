@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime;
 using System.Threading.Tasks;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -37,9 +39,12 @@ namespace TippingPoint.Benchmark.Telemetry {
       var statisticsSource = new TaskCompletionSource<Statistics>();
       var infoMessageHandler = BuildInfoMessageHandler(statisticsSource);
       connection.InfoMessage += infoMessageHandler;
+      GC.Collect(1, GCCollectionMode.Forced, true);
+      GCSettings.LatencyMode = GCLatencyMode.LowLatency;
       Stopwatch.Restart();
       var rowCount = await ExecuteQueryToBenchmarkAsync(connection, parameters);
       Stopwatch.Stop();
+      GCSettings.LatencyMode = GCLatencyMode.Batch;
       var statistics = await statisticsSource.Task;
       connection.InfoMessage -= infoMessageHandler;
       await connection.ExecuteAsync(Stats.Off);

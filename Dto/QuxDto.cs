@@ -20,7 +20,7 @@ namespace TippingPoint.Dto {
     public int QuxDatum2 { get; set; }
 
     [TvpColumn("dbo.QuxTvp", 6)]
-    public int? QuxDatum3 { get; set; }
+    public int QuxDatum3 { get; set; }
 
     [TvpColumn("dbo.QuxTvp", 7)]
     public DateTime DateCreated { get; set; }
@@ -41,7 +41,7 @@ namespace TippingPoint.Dto {
       int barId,
       int quxDatum1,
       int quxDatum2,
-      int? quxDatum3,
+      int quxDatum3,
       DateTime dateCreated,
       DateTime dateModified,
       string userCreated,
@@ -63,7 +63,7 @@ namespace TippingPoint.Dto {
 
       QuxId = Guid.NewGuid();
       QuxDatum1 = GetRandomQuxDatum1(random); // dbo.NotificationSettings.NotificationType; 58 of these spread out from 0 to 203; database kinda groups up in a few places
-      QuxDatum2 = random.Next(3); // dbo.NotificationSettings.NotificationMethod; only two of them right now
+      QuxDatum2 = random.NextDouble() < 0.3 ? 0 : 1; // dbo.NotificationSettings.NotificationMethod; only two of them right now
       QuxDatum3 = GetRandomQuxDatum3(random);
       DateCreated = utcNow;
       DateModified = utcNow;
@@ -83,14 +83,19 @@ namespace TippingPoint.Dto {
       return random.Next(50, 61);
     }
 
-    private int? GetRandomQuxDatum3(Random random) {
+    private int GetRandomQuxDatum3(Random random) {
       var value = random.NextDouble();
-      if (value < 0.3430941559247944763) return 0;
-      if (value < 0.6692745200307975063) return 1;
-      if (value < 0.7231204828254228447) return 2;
-      if (value < 0.7610212850507910487) return 3;
-      if (value < 0.7673546432208230880) return 4;
-      return null;
+      if (value < 0.0005141843971631205) return 35;
+      if (value < 0.0011524822695035460) return  5;
+      if (value < 0.0044680851063829786) return  9;
+      if (value < 0.0100177304964539005) return 32;
+      if (value < 0.0220390070921985813) return 30;
+      if (value < 0.0412588652482269500) return 20;
+      if (value < 0.0650709219858156024) return  8;
+      if (value < 0.1150177304964539002) return 10;
+      if (value < 0.3193971631205673753) return -1;
+      if (value < 0.5422695035460992901) return 50;
+      return 60;
     }
   }
 }

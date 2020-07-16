@@ -11,6 +11,13 @@ namespace TippingPoint.Benchmark.Telemetry {
     public IReadOnlyList<QueryBenchmarkBase> QueriesToBenchmark { get; } = new List<QueryBenchmarkBase> {
       new FilterBy2ColumnsBenchmark(),
       new FilterBy3ColumnsBenchmark(),
+      new FilterByFilteredIndexAnd2ColumnsBenchmark(),
+      new FilterByFilteredIndexAnd3ColumnsBenchmark(),
+      new FilterByFirstColumnBenchmark(),
+      new FilterByLastIndexColumnBenchmark(),
+      new FilterByMiddleIndexColumnBenchmark(),
+      new TryFilterByFilteredIndexWithNotInAnd2ColumnsBenchmark(),
+      new TryFilterByFilteredIndexWithNotInAnd3ColumnsBenchmark(),
     };
 
     public string Name => GetType().Name;

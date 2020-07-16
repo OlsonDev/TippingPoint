@@ -29,7 +29,7 @@ namespace TippingPoint.Sql {
 	, BarID               INT                   NULL -- OrgID
 	, QuxDatum1           INT               NOT NULL
 	, QuxDatum2           INT               NOT NULL
-	, QuxDatum3           INT                   NULL
+	, QuxDatum3           INT               NOT NULL -- Matches.Status
 	, DateCreated         DATETIME2(7)      NOT NULL
 	, DateModified        DATETIME2(7)      NOT NULL
 	, UserCreated         NVARCHAR(256)     NOT NULL

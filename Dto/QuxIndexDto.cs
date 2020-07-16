@@ -7,7 +7,7 @@ namespace TippingPoint.Dto {
     public int? BarId { get; set; }
     public int QuxDatum1 { get; set; }
     public int QuxDatum2 { get; set; }
-    public int? QuxDatum3 { get; set; }
+    public int QuxDatum3 { get; set; }
 
     public QuxIndexDto(
       Guid quxId,
@@ -15,7 +15,7 @@ namespace TippingPoint.Dto {
       int barId,
       int quxDatum1,
       int quxDatum2,
-      int? quxDatum3) {
+      int quxDatum3) {
       QuxId = quxId;
       FooId = fooId;
       BarId = barId;
